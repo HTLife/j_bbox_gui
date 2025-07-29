@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <fstream>
 #include <unistd.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -48,18 +49,46 @@ public:
     }
     
     bool LoadImage(const std::string& path) {
+        std::cout << "Attempting to load image: " << path << std::endl;
+        
+        // Check if file exists
+        std::ifstream file(path);
+        if (!file.good()) {
+            std::cerr << "File does not exist: " << path << std::endl;
+            return false;
+        }
+        file.close();
+        
         image = cv::imread(path);
         if (image.empty()) {
-            std::cerr << "Failed to load image: " << path << std::endl;
+            std::cerr << "Failed to load image (OpenCV could not decode): " << path << std::endl;
             return false;
         }
         
-        cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
+        // Debug: Check original image properties
+        std::cout << "Original image - Channels: " << image.channels() << ", Type: " << image.type() << std::endl;
+        
+        // Convert BGR to RGB for OpenGL
+        if (image.channels() == 3) {
+            cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
+        } else if (image.channels() == 4) {
+            cv::cvtColor(image, image, cv::COLOR_BGRA2RGB);
+        }
+        
+        // Don't flip - let's see the original image first
+        // cv::flip(image, image, 0);
+        
+        // Ensure image data is continuous in memory
+        if (!image.isContinuous()) {
+            image = image.clone();
+        }
+        
         imagePath = path;
         
         // Output image resolution
-        std::cout << "Image loaded: " << path << std::endl;
+        std::cout << "Image loaded successfully: " << path << std::endl;
         std::cout << "Resolution: " << image.cols << "x" << image.rows << std::endl;
+        std::cout << "Is continuous: " << image.isContinuous() << ", Step: " << image.step << std::endl;
         
         // Generate OpenGL texture
         if (textureID != 0) {
@@ -68,9 +97,17 @@ public:
         
         glGenTextures(1, &textureID);
         glBindTexture(GL_TEXTURE_2D, textureID);
+        
+        // Set pixel alignment to 1 byte to handle any row padding
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.cols, image.rows, 0, GL_RGB, GL_UNSIGNED_BYTE, image.data);
+        glBindTexture(GL_TEXTURE_2D, 0);
         
         return true;
     }
@@ -81,14 +118,31 @@ public:
         // Get the main window size
         ImGuiIO& io = ImGui::GetIO();
         
-        // Set image size to fill the entire window
-        imageSize.x = io.DisplaySize.x;
-        imageSize.y = io.DisplaySize.y;
+        // Calculate image size maintaining aspect ratio
+        float imageAspectRatio = (float)image.cols / (float)image.rows;
+        float windowAspectRatio = io.DisplaySize.x / io.DisplaySize.y;
+        
+        if (imageAspectRatio > windowAspectRatio) {
+            // Image is wider than window - fit to width
+            imageSize.x = io.DisplaySize.x;
+            imageSize.y = io.DisplaySize.x / imageAspectRatio;
+        } else {
+            // Image is taller than window - fit to height
+            imageSize.y = io.DisplaySize.y;
+            imageSize.x = io.DisplaySize.y * imageAspectRatio;
+        }
+        
+        // Center the image in the window
+        ImVec2 imageOffset;
+        imageOffset.x = (io.DisplaySize.x - imageSize.x) * 0.5f;
+        imageOffset.y = (io.DisplaySize.y - imageSize.y) * 0.5f;
         
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
         ImGui::Begin("Image Viewer", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         
+        // Set cursor position to center the image
+        ImGui::SetCursorPos(imageOffset);
         imagePos = ImGui::GetCursorScreenPos();
         
         // Display image filling the entire window
@@ -511,6 +565,7 @@ int main(int argc, char* argv[]) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.IniFilename = nullptr; // Disable saving imgui.ini file
     
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();

@@ -1,6 +1,9 @@
 # Bounding Box Annotation Tool
+[![Vibe Coding | Claude Code](https://img.shields.io/badge/vibe%20coding-claude%20code-blue?style=for-the-badge)](https://github.com/<user>/<repo>/tags)
 
 A simple ImGui-based application for loading JPG images and drawing bounding boxes with mouse drag functionality.
+
+![Sample image](./image/sample.png)
 
 ## Features
 
