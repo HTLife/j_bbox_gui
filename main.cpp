@@ -57,6 +57,10 @@ public:
         cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
         imagePath = path;
         
+        // Output image resolution
+        std::cout << "Image loaded: " << path << std::endl;
+        std::cout << "Resolution: " << image.cols << "x" << image.rows << std::endl;
+        
         // Generate OpenGL texture
         if (textureID != 0) {
             glDeleteTextures(1, &textureID);
