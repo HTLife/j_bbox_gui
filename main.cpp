@@ -36,6 +36,7 @@ private:
     BoundingBox bbox;
     ImVec2 imagePos;
     ImVec2 imageSize;
+    ResizeHandle hoveredHandle = ResizeHandle::None;
     
 public:
     ImageViewer() = default;
@@ -89,10 +90,9 @@ public:
         // Display image filling the entire window
         ImGui::Image((void*)(intptr_t)textureID, imageSize);
         
-        // Set cursor to crosshair when over the image
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
-        }
+        // Update hovered handle and set appropriate cursor
+        UpdateHoveredHandle();
+        SetCursorForHandle();
         
         // Handle mouse input for bounding box
         HandleMouseInput();
@@ -208,6 +208,11 @@ private:
         if (bbox.isSelected && bbox.isValid) {
             DrawResizeHandles(drawList, p1, p2);
         }
+        
+        // Highlight hovered edge
+        if (hoveredHandle != ResizeHandle::None && bbox.isValid) {
+            DrawHighlightedEdge(drawList, p1, p2, hoveredHandle);
+        }
     }
     
     void OutputBoundingBox() {
@@ -228,7 +233,7 @@ private:
         xmax = std::max(0, std::min(xmax, image.cols));
         ymax = std::max(0, std::min(ymax, image.rows));
         
-        std::cout << xmin << "," << ymin << "," << xmax << "," << ymax << std::endl;
+        std::cout << "(Xmin, Ymin, Xmax, Ymax) = (" << xmin << ", " << ymin << ", " << xmax << ", " << ymax << ")" << std::endl;
     }
     
     bool IsPointInBoundingBox(ImVec2 point) {
@@ -248,27 +253,30 @@ private:
         float minY = std::min(bbox.y1, bbox.y2);
         float maxY = std::max(bbox.y1, bbox.y2);
         
-        const float handleSize = 8.0f;
+        const float cornerSize = 12.0f;
+        const float edgeSize = 6.0f;
         
-        // Check corner handles first
-        if (std::abs(point.x - minX) <= handleSize && std::abs(point.y - minY) <= handleSize)
+        // Check corner handles first (always detect corners)
+        if (std::abs(point.x - minX) <= cornerSize && std::abs(point.y - minY) <= cornerSize)
             return ResizeHandle::TopLeft;
-        if (std::abs(point.x - maxX) <= handleSize && std::abs(point.y - minY) <= handleSize)
+        if (std::abs(point.x - maxX) <= cornerSize && std::abs(point.y - minY) <= cornerSize)
             return ResizeHandle::TopRight;
-        if (std::abs(point.x - minX) <= handleSize && std::abs(point.y - maxY) <= handleSize)
+        if (std::abs(point.x - minX) <= cornerSize && std::abs(point.y - maxY) <= cornerSize)
             return ResizeHandle::BottomLeft;
-        if (std::abs(point.x - maxX) <= handleSize && std::abs(point.y - maxY) <= handleSize)
+        if (std::abs(point.x - maxX) <= cornerSize && std::abs(point.y - maxY) <= cornerSize)
             return ResizeHandle::BottomRight;
         
-        // Check edge handles
-        if (std::abs(point.y - minY) <= handleSize && point.x > minX + handleSize && point.x < maxX - handleSize)
-            return ResizeHandle::Top;
-        if (std::abs(point.y - maxY) <= handleSize && point.x > minX + handleSize && point.x < maxX - handleSize)
-            return ResizeHandle::Bottom;
-        if (std::abs(point.x - minX) <= handleSize && point.y > minY + handleSize && point.y < maxY - handleSize)
-            return ResizeHandle::Left;
-        if (std::abs(point.x - maxX) <= handleSize && point.y > minY + handleSize && point.y < maxY - handleSize)
-            return ResizeHandle::Right;
+        // Check edge handles (only when selected)
+        if (bbox.isSelected) {
+            if (std::abs(point.y - minY) <= edgeSize && point.x > minX + cornerSize && point.x < maxX - cornerSize)
+                return ResizeHandle::Top;
+            if (std::abs(point.y - maxY) <= edgeSize && point.x > minX + cornerSize && point.x < maxX - cornerSize)
+                return ResizeHandle::Bottom;
+            if (std::abs(point.x - minX) <= edgeSize && point.y > minY + cornerSize && point.y < maxY - cornerSize)
+                return ResizeHandle::Left;
+            if (std::abs(point.x - maxX) <= edgeSize && point.y > minY + cornerSize && point.y < maxY - cornerSize)
+                return ResizeHandle::Right;
+        }
         
         return ResizeHandle::None;
     }
@@ -309,7 +317,7 @@ private:
     }
     
     void DrawResizeHandles(ImDrawList* drawList, ImVec2 p1, ImVec2 p2) {
-        const float handleSize = 6.0f;
+        const float handleSize = 8.0f;
         ImU32 handleColor = IM_COL32(255, 255, 255, 255);
         
         // Corner handles
@@ -358,6 +366,82 @@ private:
             ImVec2(p2.x + handleSize/2, midY + handleSize/2),
             handleColor
         );
+    }
+    
+    void UpdateHoveredHandle() {
+        if (!bbox.isValid) {
+            hoveredHandle = ResizeHandle::None;
+            return;
+        }
+        
+        ImGuiIO& io = ImGui::GetIO();
+        ImVec2 mousePos = io.MousePos;
+        
+        // Check if mouse is over the image
+        bool isOverImage = (mousePos.x >= imagePos.x && mousePos.x <= imagePos.x + imageSize.x &&
+                           mousePos.y >= imagePos.y && mousePos.y <= imagePos.y + imageSize.y);
+        
+        if (isOverImage) {
+            hoveredHandle = GetResizeHandle(mousePos);
+        } else {
+            hoveredHandle = ResizeHandle::None;
+        }
+    }
+    
+    void SetCursorForHandle() {
+        switch (hoveredHandle) {
+            case ResizeHandle::TopLeft:
+            case ResizeHandle::TopRight:
+            case ResizeHandle::BottomLeft:
+            case ResizeHandle::BottomRight:
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+                break;
+            case ResizeHandle::Top:
+            case ResizeHandle::Bottom:
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+                break;
+            case ResizeHandle::Left:
+            case ResizeHandle::Right:
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                break;
+            default:
+                // Check if hovering over image for crosshair
+                ImGuiIO& io = ImGui::GetIO();
+                ImVec2 mousePos = io.MousePos;
+                bool isOverImage = (mousePos.x >= imagePos.x && mousePos.x <= imagePos.x + imageSize.x &&
+                                   mousePos.y >= imagePos.y && mousePos.y <= imagePos.y + imageSize.y);
+                if (isOverImage) {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+                }
+                break;
+        }
+    }
+    
+    void DrawHighlightedEdge(ImDrawList* drawList, ImVec2 p1, ImVec2 p2, ResizeHandle handle) {
+        ImU32 highlightColor = IM_COL32(255, 255, 0, 255);
+        float thickness = 3.0f;
+        
+        switch (handle) {
+            case ResizeHandle::Top:
+                drawList->AddLine(ImVec2(p1.x, p1.y), ImVec2(p2.x, p1.y), highlightColor, thickness);
+                break;
+            case ResizeHandle::Bottom:
+                drawList->AddLine(ImVec2(p1.x, p2.y), ImVec2(p2.x, p2.y), highlightColor, thickness);
+                break;
+            case ResizeHandle::Left:
+                drawList->AddLine(ImVec2(p1.x, p1.y), ImVec2(p1.x, p2.y), highlightColor, thickness);
+                break;
+            case ResizeHandle::Right:
+                drawList->AddLine(ImVec2(p2.x, p1.y), ImVec2(p2.x, p2.y), highlightColor, thickness);
+                break;
+            // Don't highlight corner edges, just change cursor
+            case ResizeHandle::TopLeft:
+            case ResizeHandle::TopRight:
+            case ResizeHandle::BottomLeft:
+            case ResizeHandle::BottomRight:
+            default:
+                break;
+        }
     }
     
     void DrawCrosshair() {
