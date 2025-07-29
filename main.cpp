@@ -8,10 +8,24 @@
 #include <imgui_impl_opengl3.h>
 #include <opencv2/opencv.hpp>
 
+enum class ResizeHandle {
+    None,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Top,
+    Bottom,
+    Left,
+    Right
+};
+
 struct BoundingBox {
     float x1, y1, x2, y2;
     bool isDrawing = false;
     bool isValid = false;
+    bool isSelected = false;
+    ResizeHandle activeHandle = ResizeHandle::None;
 };
 
 class ImageViewer {
@@ -75,11 +89,19 @@ public:
         // Display image filling the entire window
         ImGui::Image((void*)(intptr_t)textureID, imageSize);
         
+        // Set cursor to crosshair when over the image
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+        }
+        
         // Handle mouse input for bounding box
         HandleMouseInput();
         
         // Draw bounding box overlay
         DrawBoundingBox();
+        
+        // Draw crosshair lines
+        DrawCrosshair();
         
         ImGui::End();
     }
@@ -97,13 +119,31 @@ private:
         
         if (isOverImage) {
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-                // Start drawing bounding box
+                if (bbox.isValid) {
+                    // Check if clicking on resize handles
+                    ResizeHandle handle = GetResizeHandle(mousePos);
+                    if (handle != ResizeHandle::None) {
+                        bbox.activeHandle = handle;
+                        bbox.isSelected = true;
+                        return;
+                    }
+                    
+                    // Check if clicking inside existing bbox
+                    if (IsPointInBoundingBox(mousePos)) {
+                        bbox.isSelected = true;
+                        return;
+                    }
+                }
+                
+                // Start drawing new bounding box
                 bbox.x1 = mousePos.x;
                 bbox.y1 = mousePos.y;
                 bbox.x2 = mousePos.x;
                 bbox.y2 = mousePos.y;
                 bbox.isDrawing = true;
                 bbox.isValid = false;
+                bbox.isSelected = false;
+                bbox.activeHandle = ResizeHandle::None;
             }
             
             if (bbox.isDrawing && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
@@ -112,15 +152,34 @@ private:
                 bbox.y2 = mousePos.y;
             }
             
-            if (bbox.isDrawing && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-                // Finish drawing bounding box
-                bbox.x2 = mousePos.x;
-                bbox.y2 = mousePos.y;
-                bbox.isDrawing = false;
-                bbox.isValid = true;
+            if (bbox.activeHandle != ResizeHandle::None && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                // Resize existing bounding box
+                ResizeBoundingBox(mousePos);
+            }
+            
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                if (bbox.isDrawing) {
+                    // Finish drawing bounding box
+                    bbox.x2 = mousePos.x;
+                    bbox.y2 = mousePos.y;
+                    bbox.isDrawing = false;
+                    bbox.isValid = true;
+                    bbox.isSelected = true;
+                    
+                    // Output coordinates to terminal
+                    OutputBoundingBox();
+                }
                 
-                // Output coordinates to terminal
-                OutputBoundingBox();
+                if (bbox.activeHandle != ResizeHandle::None) {
+                    bbox.activeHandle = ResizeHandle::None;
+                    // Output coordinates to terminal
+                    OutputBoundingBox();
+                }
+            }
+        } else {
+            // Click outside image, deselect bbox
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                bbox.isSelected = false;
             }
         }
     }
@@ -140,9 +199,15 @@ private:
         p2.x = std::min(p2.x, imagePos.x + imageSize.x);
         p2.y = std::min(p2.y, imagePos.y + imageSize.y);
         
-        ImU32 color = bbox.isDrawing ? IM_COL32(255, 255, 0, 128) : IM_COL32(255, 0, 0, 128);
+        ImU32 color = bbox.isDrawing ? IM_COL32(255, 255, 0, 128) : 
+                     (bbox.isSelected ? IM_COL32(0, 255, 0, 128) : IM_COL32(255, 0, 0, 128));
         drawList->AddRect(p1, p2, color, 0.0f, 0, 2.0f);
         drawList->AddRectFilled(p1, p2, IM_COL32(255, 255, 255, 20));
+        
+        // Draw resize handles when selected
+        if (bbox.isSelected && bbox.isValid) {
+            DrawResizeHandles(drawList, p1, p2);
+        }
     }
     
     void OutputBoundingBox() {
@@ -164,6 +229,164 @@ private:
         ymax = std::max(0, std::min(ymax, image.rows));
         
         std::cout << xmin << "," << ymin << "," << xmax << "," << ymax << std::endl;
+    }
+    
+    bool IsPointInBoundingBox(ImVec2 point) {
+        float minX = std::min(bbox.x1, bbox.x2);
+        float maxX = std::max(bbox.x1, bbox.x2);
+        float minY = std::min(bbox.y1, bbox.y2);
+        float maxY = std::max(bbox.y1, bbox.y2);
+        
+        return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+    }
+    
+    ResizeHandle GetResizeHandle(ImVec2 point) {
+        if (!bbox.isValid) return ResizeHandle::None;
+        
+        float minX = std::min(bbox.x1, bbox.x2);
+        float maxX = std::max(bbox.x1, bbox.x2);
+        float minY = std::min(bbox.y1, bbox.y2);
+        float maxY = std::max(bbox.y1, bbox.y2);
+        
+        const float handleSize = 8.0f;
+        
+        // Check corner handles first
+        if (std::abs(point.x - minX) <= handleSize && std::abs(point.y - minY) <= handleSize)
+            return ResizeHandle::TopLeft;
+        if (std::abs(point.x - maxX) <= handleSize && std::abs(point.y - minY) <= handleSize)
+            return ResizeHandle::TopRight;
+        if (std::abs(point.x - minX) <= handleSize && std::abs(point.y - maxY) <= handleSize)
+            return ResizeHandle::BottomLeft;
+        if (std::abs(point.x - maxX) <= handleSize && std::abs(point.y - maxY) <= handleSize)
+            return ResizeHandle::BottomRight;
+        
+        // Check edge handles
+        if (std::abs(point.y - minY) <= handleSize && point.x > minX + handleSize && point.x < maxX - handleSize)
+            return ResizeHandle::Top;
+        if (std::abs(point.y - maxY) <= handleSize && point.x > minX + handleSize && point.x < maxX - handleSize)
+            return ResizeHandle::Bottom;
+        if (std::abs(point.x - minX) <= handleSize && point.y > minY + handleSize && point.y < maxY - handleSize)
+            return ResizeHandle::Left;
+        if (std::abs(point.x - maxX) <= handleSize && point.y > minY + handleSize && point.y < maxY - handleSize)
+            return ResizeHandle::Right;
+        
+        return ResizeHandle::None;
+    }
+    
+    void ResizeBoundingBox(ImVec2 mousePos) {
+        switch (bbox.activeHandle) {
+            case ResizeHandle::TopLeft:
+                bbox.x1 = mousePos.x;
+                bbox.y1 = mousePos.y;
+                break;
+            case ResizeHandle::TopRight:
+                bbox.x2 = mousePos.x;
+                bbox.y1 = mousePos.y;
+                break;
+            case ResizeHandle::BottomLeft:
+                bbox.x1 = mousePos.x;
+                bbox.y2 = mousePos.y;
+                break;
+            case ResizeHandle::BottomRight:
+                bbox.x2 = mousePos.x;
+                bbox.y2 = mousePos.y;
+                break;
+            case ResizeHandle::Top:
+                bbox.y1 = mousePos.y;
+                break;
+            case ResizeHandle::Bottom:
+                bbox.y2 = mousePos.y;
+                break;
+            case ResizeHandle::Left:
+                bbox.x1 = mousePos.x;
+                break;
+            case ResizeHandle::Right:
+                bbox.x2 = mousePos.x;
+                break;
+            default:
+                break;
+        }
+    }
+    
+    void DrawResizeHandles(ImDrawList* drawList, ImVec2 p1, ImVec2 p2) {
+        const float handleSize = 6.0f;
+        ImU32 handleColor = IM_COL32(255, 255, 255, 255);
+        
+        // Corner handles
+        drawList->AddRectFilled(
+            ImVec2(p1.x - handleSize/2, p1.y - handleSize/2),
+            ImVec2(p1.x + handleSize/2, p1.y + handleSize/2),
+            handleColor
+        );
+        drawList->AddRectFilled(
+            ImVec2(p2.x - handleSize/2, p1.y - handleSize/2),
+            ImVec2(p2.x + handleSize/2, p1.y + handleSize/2),
+            handleColor
+        );
+        drawList->AddRectFilled(
+            ImVec2(p1.x - handleSize/2, p2.y - handleSize/2),
+            ImVec2(p1.x + handleSize/2, p2.y + handleSize/2),
+            handleColor
+        );
+        drawList->AddRectFilled(
+            ImVec2(p2.x - handleSize/2, p2.y - handleSize/2),
+            ImVec2(p2.x + handleSize/2, p2.y + handleSize/2),
+            handleColor
+        );
+        
+        // Edge handles
+        float midX = (p1.x + p2.x) / 2;
+        float midY = (p1.y + p2.y) / 2;
+        
+        drawList->AddRectFilled(
+            ImVec2(midX - handleSize/2, p1.y - handleSize/2),
+            ImVec2(midX + handleSize/2, p1.y + handleSize/2),
+            handleColor
+        );
+        drawList->AddRectFilled(
+            ImVec2(midX - handleSize/2, p2.y - handleSize/2),
+            ImVec2(midX + handleSize/2, p2.y + handleSize/2),
+            handleColor
+        );
+        drawList->AddRectFilled(
+            ImVec2(p1.x - handleSize/2, midY - handleSize/2),
+            ImVec2(p1.x + handleSize/2, midY + handleSize/2),
+            handleColor
+        );
+        drawList->AddRectFilled(
+            ImVec2(p2.x - handleSize/2, midY - handleSize/2),
+            ImVec2(p2.x + handleSize/2, midY + handleSize/2),
+            handleColor
+        );
+    }
+    
+    void DrawCrosshair() {
+        ImGuiIO& io = ImGui::GetIO();
+        ImVec2 mousePos = io.MousePos;
+        
+        // Check if mouse is over the image
+        bool isOverImage = (mousePos.x >= imagePos.x && mousePos.x <= imagePos.x + imageSize.x &&
+                           mousePos.y >= imagePos.y && mousePos.y <= imagePos.y + imageSize.y);
+        
+        if (isOverImage) {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            
+            // Draw horizontal line across entire window that follows mouse
+            drawList->AddLine(
+                ImVec2(0, mousePos.y), 
+                ImVec2(io.DisplaySize.x, mousePos.y), 
+                IM_COL32(255, 255, 255, 128), 
+                1.0f
+            );
+            
+            // Draw vertical line across entire window that follows mouse
+            drawList->AddLine(
+                ImVec2(mousePos.x, 0), 
+                ImVec2(mousePos.x, io.DisplaySize.y), 
+                IM_COL32(255, 255, 255, 128), 
+                1.0f
+            );
+        }
     }
 };
 
@@ -232,6 +455,11 @@ int main(int argc, char* argv[]) {
     // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        
+        // Check for 'q' key press to exit
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
         
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
