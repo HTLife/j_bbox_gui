@@ -30,7 +30,7 @@ A simple ImGui-based application for loading JPG images and drawing bounding box
 
 3. Run the application:
    ```bash
-   ./bbox_gui
+   ./j_bbox_gui
    ```
 
 ## Usage

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(bbox_gui)
+project(j_bbox_gui)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,13 +32,13 @@ set(IMGUI_SOURCES
 )
 
 # Add executable
-add_executable(bbox_gui
+add_executable(${PROJECT_NAME}
     main.cpp
     ${IMGUI_SOURCES}
 )
 
 # Link libraries
-target_link_libraries(bbox_gui
+target_link_libraries(${PROJECT_NAME}
     ${OpenGL_LIBRARIES}
     ${GLFW_LIBRARIES}
     ${OpenCV_LIBS}
@@ -48,13 +48,13 @@ target_link_libraries(bbox_gui
 )
 
 # Include ImGui directories
-target_include_directories(bbox_gui PRIVATE
+target_include_directories(${PROJECT_NAME} PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )
 
 # Compiler flags
-target_compile_options(bbox_gui PRIVATE ${GLFW_CFLAGS_OTHER})
+target_compile_options(${PROJECT_NAME} PRIVATE ${GLFW_CFLAGS_OTHER})
 
 # Install the executable to system bin folder
-install(TARGETS bbox_gui DESTINATION bin)
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)

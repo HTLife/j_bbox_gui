@@ -48,6 +48,10 @@ public:
         }
     }
     
+    void SaveCSV() {
+        SaveBoundingBoxToCSV();
+    }
+    
     bool LoadImage(const std::string& path) {
         std::cout << "Attempting to load image: " << path << std::endl;
         
@@ -292,6 +296,45 @@ private:
         ymax = std::max(0, std::min(ymax, image.rows));
         
         std::cout << "(Xmin, Ymin, Xmax, Ymax) = (" << xmin << ", " << ymin << ", " << xmax << ", " << ymax << ")" << std::endl;
+    }
+    
+    void SaveBoundingBoxToCSV() {
+        if (!bbox.isValid || imagePath.empty()) return;
+        
+        // Convert screen coordinates to image coordinates
+        float scaleX = (float)image.cols / imageSize.x;
+        float scaleY = (float)image.rows / imageSize.y;
+        
+        int xmin = (int)((std::min(bbox.x1, bbox.x2) - imagePos.x) * scaleX);
+        int ymin = (int)((std::min(bbox.y1, bbox.y2) - imagePos.y) * scaleY);
+        int xmax = (int)((std::max(bbox.x1, bbox.x2) - imagePos.x) * scaleX);
+        int ymax = (int)((std::max(bbox.y1, bbox.y2) - imagePos.y) * scaleY);
+        
+        // Clamp to image bounds
+        xmin = std::max(0, std::min(xmin, image.cols));
+        ymin = std::max(0, std::min(ymin, image.rows));
+        xmax = std::max(0, std::min(xmax, image.cols));
+        ymax = std::max(0, std::min(ymax, image.rows));
+        
+        // Generate CSV file path (same as image path but with .csv extension)
+        std::string csvPath = imagePath;
+        size_t lastDot = csvPath.find_last_of('.');
+        if (lastDot != std::string::npos) {
+            csvPath = csvPath.substr(0, lastDot) + ".csv";
+        } else {
+            csvPath += ".csv";
+        }
+        
+        // Write CSV file in overwrite mode
+        std::ofstream csvFile(csvPath);
+        if (csvFile.is_open()) {
+            csvFile << "x_min,y_min,x_max,y_max" << std::endl;
+            csvFile << xmin << "," << ymin << "," << xmax << "," << ymax << std::endl;
+            csvFile.close();
+            std::cout << "Bounding box saved to: " << csvPath << std::endl;
+        } else {
+            std::cerr << "Failed to save CSV file: " << csvPath << std::endl;
+        }
     }
     
     bool IsPointInBoundingBox(ImVec2 point) {
@@ -603,6 +646,14 @@ int main(int argc, char* argv[]) {
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
         }
+        
+        // Check for 's' key press to save CSV
+        static bool sPrevPressed = false;
+        bool sCurrentPressed = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
+        if (sCurrentPressed && !sPrevPressed) {
+            viewer.SaveCSV();
+        }
+        sPrevPressed = sCurrentPressed;
         
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
