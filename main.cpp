@@ -903,12 +903,54 @@ int main(int argc, char* argv[]) {
         std::cout << "Raw argument length: " << strlen(rawPath) << std::endl;
         
         // Create string carefully
-        std::string imagePath(rawPath);
-        std::cout << "String length: " << imagePath.length() << std::endl;
-        std::cout << "Command line argument: " << imagePath << std::endl;
+        std::string inputPath(rawPath);
+        std::cout << "String length: " << inputPath.length() << std::endl;
+        std::cout << "Command line argument: " << inputPath << std::endl;
         
-        if (!viewer.LoadImage(imagePath)) {
-            std::cerr << "Failed to load image: " << imagePath << std::endl;
+        try {
+            // Check if the path is a directory
+            if (std::filesystem::is_directory(inputPath)) {
+                std::cout << "Input is a directory, looking for first image..." << std::endl;
+                
+                std::vector<std::string> supportedExtensions = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tga"};
+                std::vector<std::string> foundImages;
+                
+                // Find all images in the directory
+                for (const auto& entry : std::filesystem::directory_iterator(inputPath)) {
+                    if (entry.is_regular_file()) {
+                        std::string extension = entry.path().extension().string();
+                        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+                        
+                        if (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end()) {
+                            foundImages.push_back(entry.path().string());
+                        }
+                    }
+                }
+                
+                if (!foundImages.empty()) {
+                    // Sort the images
+                    std::sort(foundImages.begin(), foundImages.end());
+                    std::string firstImage = foundImages[0];
+                    std::cout << "Found " << foundImages.size() << " images, loading first: " << std::filesystem::path(firstImage).filename().string() << std::endl;
+                    
+                    if (!viewer.LoadImage(firstImage)) {
+                        std::cerr << "Failed to load first image: " << firstImage << std::endl;
+                    }
+                } else {
+                    std::cerr << "No supported images found in directory: " << inputPath << std::endl;
+                }
+            } else {
+                // Input is a file, load it directly
+                if (!viewer.LoadImage(inputPath)) {
+                    std::cerr << "Failed to load image: " << inputPath << std::endl;
+                }
+            }
+        } catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Filesystem error: " << e.what() << std::endl;
+            std::cerr << "Trying to load as regular file..." << std::endl;
+            if (!viewer.LoadImage(inputPath)) {
+                std::cerr << "Failed to load image: " << inputPath << std::endl;
+            }
         }
     }
     
