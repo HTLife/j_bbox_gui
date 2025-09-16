@@ -295,7 +295,14 @@ private:
         xmax = std::max(0, std::min(xmax, image.cols));
         ymax = std::max(0, std::min(ymax, image.rows));
         
+        // Calculate YOLOv5 format: class x_center y_center width height (normalized)
+        float x_center = (xmin + xmax) / 2.0f / image.cols;
+        float y_center = (ymin + ymax) / 2.0f / image.rows;
+        float width = (xmax - xmin) / (float)image.cols;
+        float height = (ymax - ymin) / (float)image.rows;
+        
         std::cout << "(Xmin, Ymin, Xmax, Ymax) = (" << xmin << ", " << ymin << ", " << xmax << ", " << ymax << ")" << std::endl;
+        std::cout << "YOLOv5 format: 0 " << x_center << " " << y_center << " " << width << " " << height << std::endl;
     }
     
     void SaveBoundingBoxToCSV() {
