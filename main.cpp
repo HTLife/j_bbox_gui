@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <vector>
 #include <algorithm>
+#include <sstream>
 
 enum class ResizeHandle {
     None,
@@ -29,6 +30,8 @@ struct BoundingBox {
     bool isDrawing = false;
     bool isValid = false;
     bool isSelected = false;
+    bool loadedFromCSV = false;
+    int pixelX1 = 0, pixelY1 = 0, pixelX2 = 0, pixelY2 = 0;  // Store original pixel coordinates
     ResizeHandle activeHandle = ResizeHandle::None;
 };
 
@@ -55,6 +58,10 @@ public:
     
     void SaveCSV() {
         SaveBoundingBoxToCSV();
+    }
+    
+    void LoadCSV() {
+        LoadBoundingBoxFromCSV();
     }
     
     bool LoadImage(const std::string& path) {
@@ -100,6 +107,9 @@ public:
         
         // Scan for other images in the same directory
         ScanDirectory();
+        
+        // Try to load corresponding CSV file (coordinates will be calculated during first render)
+        LoadBoundingBoxFromCSV();
         
         // Output image resolution
         std::cout << "Image loaded successfully: " << filePath.filename().string() << std::endl;
@@ -161,6 +171,22 @@ public:
         ImGui::SetCursorPos(imageOffset);
         imagePos = ImGui::GetCursorScreenPos();
         
+        // Convert pixel coordinates to screen coordinates if loaded from CSV
+        if (bbox.loadedFromCSV && bbox.isValid) {
+            float scaleX = imageSize.x / (float)image.cols;
+            float scaleY = imageSize.y / (float)image.rows;
+            
+            bbox.x1 = imagePos.x + bbox.pixelX1 * scaleX;
+            bbox.y1 = imagePos.y + bbox.pixelY1 * scaleY;
+            bbox.x2 = imagePos.x + bbox.pixelX2 * scaleX;
+            bbox.y2 = imagePos.y + bbox.pixelY2 * scaleY;
+            bbox.loadedFromCSV = false; // Only convert once
+            
+            std::cout << "Converted to screen coordinates: (" << bbox.x1 << "," << bbox.y1 << "," << bbox.x2 << "," << bbox.y2 << ")" << std::endl;
+            std::cout << "Image size: " << imageSize.x << "x" << imageSize.y << ", Image pos: " << imagePos.x << "," << imagePos.y << std::endl;
+            std::cout << "Scale factors: " << scaleX << "," << scaleY << std::endl;
+        }
+        
         // Display image filling the entire window
         ImGui::Image((void*)(intptr_t)textureID, imageSize);
         
@@ -186,7 +212,7 @@ public:
         int nextIndex = (currentImageIndex + 1) % imageFiles.size();
         std::filesystem::path nextPath(imageFiles[nextIndex]);
         std::cout << "Navigating to next image: " << nextPath.filename().string() << " (" << (nextIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
-        bbox = BoundingBox();
+        bbox = BoundingBox(); // Reset bounding box for new image
         LoadImage(imageFiles[nextIndex]);
     }
     
@@ -196,7 +222,7 @@ public:
         int prevIndex = (currentImageIndex - 1 + imageFiles.size()) % imageFiles.size();
         std::filesystem::path prevPath(imageFiles[prevIndex]);
         std::cout << "Navigating to previous image: " << prevPath.filename().string() << " (" << (prevIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
-        bbox = BoundingBox();
+        bbox = BoundingBox(); // Reset bounding box for new image
         LoadImage(imageFiles[prevIndex]);
     }
     
@@ -279,7 +305,11 @@ private:
     }
     
     void DrawBoundingBox() {
-        if (textureID == 0 || (!bbox.isDrawing && !bbox.isValid)) return;
+        if (textureID == 0 || (!bbox.isDrawing && !bbox.isValid)) {
+            return;
+        }
+        
+        // std::cout << "Drawing bounding box - isValid: " << bbox.isValid << ", isDrawing: " << bbox.isDrawing << std::endl;
         
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         
@@ -662,6 +692,110 @@ private:
             std::cerr << "Directory path: " << directory.string() << std::endl;
         }
     }
+    
+    void LoadBoundingBoxFromCSV() {
+        if (imagePath.empty()) {
+            std::cout << "No image path available for CSV loading" << std::endl;
+            return;
+        }
+        
+        // Generate CSV file path (same as image path but with .csv extension)
+        std::string csvPath = imagePath;
+        size_t lastDot = csvPath.find_last_of('.');
+        if (lastDot != std::string::npos) {
+            csvPath = csvPath.substr(0, lastDot) + ".csv";
+        } else {
+            csvPath += ".csv";
+        }
+        
+        std::cout << "Current image path: " << imagePath << std::endl;
+        std::cout << "Looking for CSV file: " << csvPath << std::endl;
+        
+        // Check if CSV file exists
+        if (!std::filesystem::exists(csvPath)) {
+            std::cout << "CSV file does not exist: " << csvPath << std::endl;
+            return;
+        }
+        
+        std::ifstream csvFile(csvPath);
+        if (!csvFile.is_open()) {
+            std::cout << "Failed to open CSV file: " << csvPath << std::endl;
+            return;
+        }
+        
+        std::cout << "Successfully opened CSV file" << std::endl;
+        
+        std::string line;
+        bool headerSkipped = false;
+        int lineCount = 0;
+        
+        while (std::getline(csvFile, line)) {
+            lineCount++;
+            std::cout << "Reading line " << lineCount << ": " << line << std::endl;
+            
+            // Skip header line if it contains text (not numbers)
+            if (!headerSkipped) {
+                headerSkipped = true;
+                // Check if this line looks like a header (contains letters) or data (only numbers and commas)
+                bool isHeader = false;
+                for (char c : line) {
+                    if (std::isalpha(c)) {
+                        isHeader = true;
+                        break;
+                    }
+                }
+                if (isHeader) {
+                    std::cout << "Skipping header line: " << line << std::endl;
+                    continue;
+                } else {
+                    std::cout << "First line appears to be data, not header: " << line << std::endl;
+                }
+            }
+            
+            // Parse CSV line: x_min,y_min,x_max,y_max
+            std::stringstream ss(line);
+            std::string token;
+            std::vector<std::string> tokens;
+            
+            while (std::getline(ss, token, ',')) {
+                tokens.push_back(token);
+            }
+            
+            std::cout << "Parsed " << tokens.size() << " tokens from line" << std::endl;
+            for (size_t i = 0; i < tokens.size(); i++) {
+                std::cout << "Token " << i << ": '" << tokens[i] << "'" << std::endl;
+            }
+            
+            if (tokens.size() >= 4) {
+                try {
+                    int xmin = std::stoi(tokens[0]);
+                    int ymin = std::stoi(tokens[1]);
+                    int xmax = std::stoi(tokens[2]);
+                    int ymax = std::stoi(tokens[3]);
+                    
+                    // Store pixel coordinates - screen coordinates will be calculated during render
+                    bbox.pixelX1 = xmin;
+                    bbox.pixelY1 = ymin;
+                    bbox.pixelX2 = xmax;
+                    bbox.pixelY2 = ymax;
+                    bbox.isValid = true;
+                    bbox.isSelected = false;
+                    bbox.isDrawing = false;
+                    bbox.loadedFromCSV = true;
+                    bbox.activeHandle = ResizeHandle::None;
+                    
+                    std::cout << "Loaded bounding box from CSV: (" << xmin << "," << ymin << "," << xmax << "," << ymax << ")" << std::endl;
+                    std::cout << "bbox.isValid = " << bbox.isValid << ", bbox.loadedFromCSV = " << bbox.loadedFromCSV << std::endl;
+                    
+                    break; // Only load the first bounding box for now
+                } catch (const std::exception& e) {
+                    std::cerr << "Error parsing CSV line: " << line << " - " << e.what() << std::endl;
+                }
+            }
+        }
+        
+        csvFile.close();
+    }
 };
 
 int main(int argc, char* argv[]) {
@@ -754,6 +888,11 @@ int main(int argc, char* argv[]) {
         
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
             viewer.NavigateNext();
+        }
+        
+        // Check for 'L' key press to load CSV
+        if (ImGui::IsKeyPressed(ImGuiKey_L)) {
+            viewer.LoadCSV();
         }
         
         // Render image viewer
