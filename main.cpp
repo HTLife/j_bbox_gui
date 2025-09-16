@@ -203,13 +203,22 @@ public:
         // Draw crosshair lines
         DrawCrosshair();
         
+        // Draw file path at the bottom of the window as overlay
+        DrawFilePathOverlay();
+        
         ImGui::End();
     }
     
     void NavigateNext() {
         if (imageFiles.empty() || currentImageIndex == -1) return;
         
-        int nextIndex = (currentImageIndex + 1) % imageFiles.size();
+        // Check if we're already at the last image
+        if (currentImageIndex >= static_cast<int>(imageFiles.size()) - 1) {
+            std::cout << "Already at the last image (" << (currentImageIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
+            return;
+        }
+        
+        int nextIndex = currentImageIndex + 1;
         std::filesystem::path nextPath(imageFiles[nextIndex]);
         std::cout << "Navigating to next image: " << nextPath.filename().string() << " (" << (nextIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
         bbox = BoundingBox(); // Reset bounding box for new image
@@ -219,7 +228,13 @@ public:
     void NavigatePrevious() {
         if (imageFiles.empty() || currentImageIndex == -1) return;
         
-        int prevIndex = (currentImageIndex - 1 + imageFiles.size()) % imageFiles.size();
+        // Check if we're already at the first image
+        if (currentImageIndex <= 0) {
+            std::cout << "Already at the first image (" << (currentImageIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
+            return;
+        }
+        
+        int prevIndex = currentImageIndex - 1;
         std::filesystem::path prevPath(imageFiles[prevIndex]);
         std::cout << "Navigating to previous image: " << prevPath.filename().string() << " (" << (prevIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
         bbox = BoundingBox(); // Reset bounding box for new image
@@ -643,6 +658,38 @@ private:
         }
     }
     
+    void DrawFilePathOverlay() {
+        if (imagePath.empty()) return;
+        
+        ImGuiIO& io = ImGui::GetIO();
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        
+        // Prepare the text to display with file index
+        std::string displayText;
+        if (currentImageIndex >= 0 && !imageFiles.empty()) {
+            displayText = "[" + std::to_string(currentImageIndex + 1) + " / " + std::to_string(imageFiles.size()) + "] " + imagePath;
+        } else {
+            displayText = imagePath;
+        }
+        
+        // Calculate text size
+        ImVec2 textSize = ImGui::CalcTextSize(displayText.c_str());
+        
+        // Position at bottom of window with some padding
+        float padding = 10.0f;
+        ImVec2 textPos;
+        textPos.x = padding;
+        textPos.y = io.DisplaySize.y - textSize.y - padding;
+        
+        // Draw semi-transparent background
+        ImVec2 bgMin = ImVec2(textPos.x - 5.0f, textPos.y - 3.0f);
+        ImVec2 bgMax = ImVec2(textPos.x + textSize.x + 5.0f, textPos.y + textSize.y + 3.0f);
+        drawList->AddRectFilled(bgMin, bgMax, IM_COL32(0, 0, 0, 128)); // Semi-transparent black background
+        
+        // Draw the text
+        drawList->AddText(textPos, IM_COL32(255, 255, 255, 255), displayText.c_str());
+    }
+    
     void ScanDirectory() {
         imageFiles.clear();
         currentImageIndex = -1;
@@ -679,13 +726,19 @@ private:
             
             std::sort(imageFiles.begin(), imageFiles.end());
             
+            std::cout << "Found " << imageFiles.size() << " images in directory" << std::endl;
+            std::cout << "First few files after sorting:" << std::endl;
+            for (size_t i = 0; i < std::min((size_t)5, imageFiles.size()); i++) {
+                std::filesystem::path p(imageFiles[i]);
+                std::cout << "  " << i << ": " << p.filename().string() << std::endl;
+            }
+            
             // Find current image in the list
             auto it = std::find(imageFiles.begin(), imageFiles.end(), this->imagePath);
             if (it != imageFiles.end()) {
                 currentImageIndex = std::distance(imageFiles.begin(), it);
             }
             
-            std::cout << "Found " << imageFiles.size() << " images in directory" << std::endl;
             std::cout << "Current image index: " << currentImageIndex << std::endl;
         } catch (const std::filesystem::filesystem_error& ex) {
             std::cerr << "Error scanning directory: " << ex.what() << std::endl;
