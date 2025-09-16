@@ -8,6 +8,9 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <opencv2/opencv.hpp>
+#include <filesystem>
+#include <vector>
+#include <algorithm>
 
 enum class ResizeHandle {
     None,
@@ -34,6 +37,8 @@ private:
     cv::Mat image;
     GLuint textureID = 0;
     std::string imagePath;
+    std::vector<std::string> imageFiles;
+    int currentImageIndex = -1;
     BoundingBox bbox;
     ImVec2 imagePos;
     ImVec2 imageSize;
@@ -53,7 +58,11 @@ public:
     }
     
     bool LoadImage(const std::string& path) {
-        std::cout << "Attempting to load image: " << path << std::endl;
+        std::cout << "LoadImage called with path length: " << path.length() << std::endl;
+        std::cout << "LoadImage path parameter: " << path << std::endl;
+        
+        std::filesystem::path filePath(path);
+        std::cout << "Attempting to load image: " << filePath.filename().string() << std::endl;
         
         // Check if file exists
         std::ifstream file(path);
@@ -89,8 +98,11 @@ public:
         
         imagePath = path;
         
+        // Scan for other images in the same directory
+        ScanDirectory();
+        
         // Output image resolution
-        std::cout << "Image loaded successfully: " << path << std::endl;
+        std::cout << "Image loaded successfully: " << filePath.filename().string() << std::endl;
         std::cout << "Resolution: " << image.cols << "x" << image.rows << std::endl;
         std::cout << "Is continuous: " << image.isContinuous() << ", Step: " << image.step << std::endl;
         
@@ -166,6 +178,26 @@ public:
         DrawCrosshair();
         
         ImGui::End();
+    }
+    
+    void NavigateNext() {
+        if (imageFiles.empty() || currentImageIndex == -1) return;
+        
+        int nextIndex = (currentImageIndex + 1) % imageFiles.size();
+        std::filesystem::path nextPath(imageFiles[nextIndex]);
+        std::cout << "Navigating to next image: " << nextPath.filename().string() << " (" << (nextIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
+        bbox = BoundingBox();
+        LoadImage(imageFiles[nextIndex]);
+    }
+    
+    void NavigatePrevious() {
+        if (imageFiles.empty() || currentImageIndex == -1) return;
+        
+        int prevIndex = (currentImageIndex - 1 + imageFiles.size()) % imageFiles.size();
+        std::filesystem::path prevPath(imageFiles[prevIndex]);
+        std::cout << "Navigating to previous image: " << prevPath.filename().string() << " (" << (prevIndex + 1) << "/" << imageFiles.size() << ")" << std::endl;
+        bbox = BoundingBox();
+        LoadImage(imageFiles[prevIndex]);
     }
     
 private:
@@ -580,6 +612,56 @@ private:
             );
         }
     }
+    
+    void ScanDirectory() {
+        imageFiles.clear();
+        currentImageIndex = -1;
+        
+        // Simple approach - extract directory from the stored member variable instead
+        std::filesystem::path path(this->imagePath);  // Use the stored clean path
+        std::filesystem::path directory = path.parent_path();
+        
+        std::cout << "Scanning for images in: " << directory.string() << std::endl;
+        
+        std::vector<std::string> supportedExtensions = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tga"};
+        
+        try {
+            if (!std::filesystem::exists(directory)) {
+                std::cerr << "Directory does not exist: " << directory.string() << std::endl;
+                return;
+            }
+            
+            if (!std::filesystem::is_directory(directory)) {
+                std::cerr << "Path is not a directory: " << directory.string() << std::endl;
+                return;
+            }
+            
+            for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+                if (entry.is_regular_file()) {
+                    std::string extension = entry.path().extension().string();
+                    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+                    
+                    if (std::find(supportedExtensions.begin(), supportedExtensions.end(), extension) != supportedExtensions.end()) {
+                        imageFiles.push_back(entry.path().string());
+                    }
+                }
+            }
+            
+            std::sort(imageFiles.begin(), imageFiles.end());
+            
+            // Find current image in the list
+            auto it = std::find(imageFiles.begin(), imageFiles.end(), this->imagePath);
+            if (it != imageFiles.end()) {
+                currentImageIndex = std::distance(imageFiles.begin(), it);
+            }
+            
+            std::cout << "Found " << imageFiles.size() << " images in directory" << std::endl;
+            std::cout << "Current image index: " << currentImageIndex << std::endl;
+        } catch (const std::filesystem::filesystem_error& ex) {
+            std::cerr << "Error scanning directory: " << ex.what() << std::endl;
+            std::cerr << "Directory path: " << directory.string() << std::endl;
+        }
+    }
 };
 
 int main(int argc, char* argv[]) {
@@ -629,16 +711,14 @@ int main(int argc, char* argv[]) {
     
     // Load image from command line if provided
     if (argc > 1) {
-        std::string imagePath = argv[1];
+        // Use the raw argv directly to avoid any string copying issues
+        const char* rawPath = argv[1];
+        std::cout << "Raw argument length: " << strlen(rawPath) << std::endl;
         
-        // Convert relative path to absolute path if needed
-        if (imagePath[0] != '/') {
-            char* cwd = getcwd(nullptr, 0);
-            if (cwd != nullptr) {
-                imagePath = std::string(cwd) + "/" + imagePath;
-                free(cwd);
-            }
-        }
+        // Create string carefully
+        std::string imagePath(rawPath);
+        std::cout << "String length: " << imagePath.length() << std::endl;
+        std::cout << "Command line argument: " << imagePath << std::endl;
         
         if (!viewer.LoadImage(imagePath)) {
             std::cerr << "Failed to load image: " << imagePath << std::endl;
@@ -666,6 +746,15 @@ int main(int argc, char* argv[]) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        
+        // Check for arrow key presses using ImGui (after ImGui::NewFrame())
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
+            viewer.NavigatePrevious();
+        }
+        
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
+            viewer.NavigateNext();
+        }
         
         // Render image viewer
         viewer.Render();
